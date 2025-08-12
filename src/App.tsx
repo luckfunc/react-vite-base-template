@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { Button, message } from 'antd';
-import { UploadOutlined } from '@ant-design/icons';
+import { Button, message, List, Card, Tag } from 'antd';
+import { UploadOutlined, PaperClipOutlined } from '@ant-design/icons';
 import FileCenterModal from './components/FileCenterModal';
 import type { UploadFile } from 'antd';
 import type { RadioChangeEvent } from 'antd';
@@ -14,11 +14,23 @@ interface UploadedFile {
   url: string;
 }
 
+interface ListItem {
+  id: number;
+  name: string;
+  video: UploadedFile | null;
+}
+
 const App: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [uploadLists, setUploadLists] = useState<Record<number, UploadFile[]>>({});
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [mode, setMode] = useState('list');
+  const [currentItemId, setCurrentItemId] = useState<number | null>(null);
+  const [items, setItems] = useState<ListItem[]>([
+    { id: 1, name: '视频任务一', video: null },
+    { id: 2, name: '视频任务二', video: null },
+    { id: 3, name: '视频任务三', video: null },
+  ]);
 
   const uploadQueue = useRef<any[]>([]);
   const activeUploads = useRef(0);
@@ -28,33 +40,43 @@ const App: React.FC = () => {
       const task = uploadQueue.current.shift();
       if (task) {
         activeUploads.current++;
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+
         performUpload(task);
       }
     }
   }, []);
 
+  const handleUploadSuccess = (fileInfo: UploadedFile, itemId: number) => {
+    setItems((prevItems) =>
+      prevItems.map((item) =>
+        (item.id === itemId ? { ...item, video: fileInfo } : item)));
+    if (itemId === currentItemId) {
+      setMode('list');
+      fetchUploadedFiles();
+    }
+  };
+
   const performUpload = useCallback((task: any) => {
-    const { file, onSuccess, onError, onProgress } = task;
+    const { file, onSuccess, onError, onProgress, itemId } = task;
     const formData = new FormData();
     formData.append('video', file as File);
 
-    // The onUploadProgress handler is removed to stop tracking progress.
-    axios.post('http://localhost:3001/upload', formData).then(response => {
+    axios.post('http://localhost:3001/upload', formData).then((response) => {
       activeUploads.current--;
-      // Manually set progress to 100% on success for AntD's internal state
       onProgress?.({ percent: 100 });
-      onSuccess?.(response.data);
+      onSuccess?.(response.data, file);
+      handleUploadSuccess(response.data, itemId);
       processQueue();
-    }).catch(error => {
+    }).catch((error) => {
       activeUploads.current--;
       onError?.(new Error(error.message || '网络错误或其他上传错误'));
       processQueue();
     });
-  }, [processQueue]);
+  }, [processQueue, currentItemId]);
 
   const customUploadRequest = (options: any) => {
-    uploadQueue.current.push(options);
+    const taskWithOptions = { ...options, itemId: currentItemId };
+    uploadQueue.current.push(taskWithOptions);
     processQueue();
   };
 
@@ -75,33 +97,72 @@ const App: React.FC = () => {
     }
   };
 
-  const handleModalOpen = () => {
+  const handleModalOpen = (id: number) => {
+    setCurrentItemId(id);
     setIsModalOpen(true);
-    setMode('list');
+    const currentItem = items.find((item) => item.id === id);
+    setMode(currentItem?.video ? 'list' : 'upload');
     fetchUploadedFiles();
   };
 
   const handleModalClose = () => {
     setIsModalOpen(false);
+    setCurrentItemId(null);
+  };
+
+  const handleFileListChange = (newFileList: UploadFile[]) => {
+    if (currentItemId === null) return;
+    setUploadLists((prevLists) => ({
+      ...prevLists,
+      [currentItemId]: newFileList,
+    }));
   };
 
   return (
     <div style={{ padding: '24px' }}>
-      <Button type="primary" icon={<UploadOutlined />} onClick={handleModalOpen}>
-        打开上传弹框
-      </Button>
+      <Card title="视频任务列表">
+        <List
+          dataSource={items}
+          renderItem={(item) => (
+            <List.Item
+              actions={[
+                <Button
+                  icon={<UploadOutlined />}
+                  onClick={() => handleModalOpen(item.id)}
+                >
+                  上传/管理视频
+                </Button>,
+              ]}
+            >
+              <List.Item.Meta
+                title={item.name}
+                description={
+                  item.video ? (
+                    <Tag icon={<PaperClipOutlined />} color="blue">
+                      {item.video.name}
+                    </Tag>
+                  ) : (
+                    '暂未上传视频'
+                  )
+                }
+              />
+            </List.Item>
+          )}
+        />
+      </Card>
 
       <FileCenterModal
         open={isModalOpen}
         onClose={handleModalClose}
         mode={mode}
         handleModeChange={handleModeChange}
-        fileList={fileList}
-        setFileList={setFileList}
+        fileList={currentItemId ? uploadLists[currentItemId] || [] : []}
+        onFileListChange={handleFileListChange}
         uploadedFiles={uploadedFiles}
         customUploadRequest={customUploadRequest}
         uploadQueue={uploadQueue}
         maxConcurrentUploads={MAX_CONCURRENT_UPLOADS}
+        associatedVideo={items.find((item) => item.id === currentItemId)?.video}
       />
     </div>
   );

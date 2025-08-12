@@ -15,11 +15,13 @@ interface FileCenterModalProps {
   mode: string;
   handleModeChange: (e: RadioChangeEvent) => void;
   fileList: UploadFile[];
-  setFileList: React.Dispatch<React.SetStateAction<Array<UploadFile<any>>>>;
+  onFileListChange: (fileList: UploadFile[]) => void;
   uploadedFiles: UploadedFile[];
   customUploadRequest: (options: any) => void;
   uploadQueue: React.MutableRefObject<any[]>;
   maxConcurrentUploads: number;
+  onUploadSuccess?: (fileInfo: UploadedFile) => void;
+  associatedVideo: UploadedFile | null | undefined;
 }
 
 const FileCenterModal: React.FC<FileCenterModalProps> = ({
@@ -28,11 +30,12 @@ const FileCenterModal: React.FC<FileCenterModalProps> = ({
   mode,
   handleModeChange,
   fileList,
-  setFileList,
-  uploadedFiles,
+  onFileListChange,
   customUploadRequest,
   uploadQueue,
   maxConcurrentUploads,
+  onUploadSuccess,
+  associatedVideo,
 }) => {
   const renderUploadMode = () => (
     <>
@@ -42,34 +45,27 @@ const FileCenterModal: React.FC<FileCenterModalProps> = ({
         customRequest={customUploadRequest}
         showUploadList={false}
         onChange={(info) => {
-          const newFileList = info.fileList.map((file) => {
-            if (file.status === 'uploading' && !file.percent) {
-              // @ts-ignore
-              if (!file.statusSetted) {
-                file.status = 'waiting';
-                // @ts-ignore
-                file.statusSetted = true;
-              }
-            }
-            return file;
-          });
-          setFileList(newFileList);
+          onFileListChange(info.fileList);
 
           if (info.file.status === 'done') {
             message.success(`${info.file.name} 上传成功`);
+            if (onUploadSuccess) {
+              onUploadSuccess(info.file.response);
+            }
           } else if (info.file.status === 'error') {
             message.error(`${info.file.name} 上传失败`);
           }
         }}
         fileList={fileList}
         onRemove={(file) => {
+          const newFileList = fileList.filter((item) => item.uid !== file.uid);
+          onFileListChange(newFileList);
           uploadQueue.current = uploadQueue.current.filter((task) => task.file !== file);
-          setFileList(fileList.filter((item) => item.uid !== file.uid));
         }}
       >
         <p className="ant-upload-drag-icon"><UploadOutlined /></p>
         <p className="ant-upload-text">点击或拖拽视频文件到此区域进行上传</p>
-        <p className="ant-upload-hint">严格控制并发为 {maxConcurrentUploads}。关闭弹框不会中断上传。</p>
+        <p className="ant-upload-hint">支持多个文件，并发上传数为 {maxConcurrentUploads}。关闭弹窗不会中断上传。</p>
       </Upload.Dragger>
 
       <h3 style={{ marginTop: '24px' }}>上传任务列表</h3>
@@ -89,7 +85,6 @@ const FileCenterModal: React.FC<FileCenterModalProps> = ({
                   {file.status === 'waiting' && <Tag color="default">等待中</Tag>}
                 </span>
               </div>
-              {/* The Progress component is now removed */}
             </div>
           ))
         )}
@@ -100,9 +95,9 @@ const FileCenterModal: React.FC<FileCenterModalProps> = ({
   const renderListMode = () => (
     <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
       <List
-        header={<div>已上传文件列表</div>}
+        header={<div>已关联的视频</div>}
         bordered
-        dataSource={uploadedFiles}
+        dataSource={associatedVideo ? [associatedVideo] : []}
         renderItem={(item) => (
           <List.Item
             actions={[
@@ -114,7 +109,7 @@ const FileCenterModal: React.FC<FileCenterModalProps> = ({
             {item.name}
           </List.Item>
         )}
-        locale={{ emptyText: '暂无文件' }}
+        locale={{ emptyText: '当前任务暂未关联视频' }}
       />
     </div>
   );
@@ -124,7 +119,7 @@ const FileCenterModal: React.FC<FileCenterModalProps> = ({
       title="文件中心"
       open={open}
       onCancel={onClose}
-      footer={[<Button key="close" onClick={onClose}>关闭</Button>]}
+      footer={[<Button key="close" onClick={onClose}>关闭</Button>]} // 保持只有关闭按钮
       width={600}
     >
       <Radio.Group onChange={handleModeChange} value={mode} style={{ marginBottom: 16 }}>
